@@ -46,16 +46,23 @@ export default function VideoUploader({ onVideoUploaded, disabled }: VideoUpload
       const uniqueFilename = `${uuidv4()}.${fileExtension}`
       const storagePath = `videos/${uniqueFilename}`
 
+      // Simulate progress for better UX since Supabase doesn't provide upload progress
+      const progressInterval = setInterval(() => {
+        setUploadProgress(prev => {
+          if (prev >= 90) return prev
+          return prev + Math.random() * 15
+        })
+      }, 200)
+
       const { error: uploadError } = await supabase.storage
         .from('videos')
         .upload(storagePath, file, {
           cacheControl: '3600',
-          upsert: false,
-          onUploadProgress: (progress: { loaded: number; total: number }) => {
-            const percent = (progress.loaded / progress.total) * 100
-            setUploadProgress(percent)
-          }
+          upsert: false
         })
+
+      clearInterval(progressInterval)
+      setUploadProgress(100)
 
       if (uploadError) {
         throw new Error(`Upload failed: ${uploadError.message}`)
