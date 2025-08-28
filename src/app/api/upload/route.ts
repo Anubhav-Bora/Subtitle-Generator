@@ -2,17 +2,36 @@ import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/app/lib/supabase'
 import { v4 as uuidv4 } from 'uuid'
 
+export const maxDuration = 300;
+
 export async function POST(request: NextRequest) {
   try {
+    const contentLength = request.headers.get('content-length');
+    if (contentLength) {
+      const sizeMB = parseInt(contentLength) / (1024 * 1024);
+      if (sizeMB > 50) {
+        return NextResponse.json({ 
+          error: 'File size exceeds 50MB limit. Please use a smaller file.' 
+        }, { status: 413 });
+      }
+    }
+
     const formData = await request.formData()
     const file = formData.get('video') as File
-    
+     
     if (!file) {
       return NextResponse.json({ error: 'No file provided' }, { status: 400 })
     }
 
     if (!file.type.startsWith('video/')) {
       return NextResponse.json({ error: 'File must be a video' }, { status: 400 })
+    }
+
+    const fileSizeMB = file.size / (1024 * 1024);
+    if (fileSizeMB > 50) {
+      return NextResponse.json({ 
+        error: `File size (${fileSizeMB.toFixed(1)}MB) exceeds 50MB limit.` 
+      }, { status: 413 });
     }
 
     const fileExtension = file.name.split('.').pop()

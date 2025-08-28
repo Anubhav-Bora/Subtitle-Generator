@@ -26,8 +26,8 @@ export default function VideoUploader({ onVideoUploaded, disabled }: VideoUpload
   const handleFile = useCallback(async (file: File) => {
     if (disabled || uploading) return
 
-    if (file.size > 100 * 1024 * 1024) {
-      alert('File size must be less than 100MB')
+    if (file.size > 50 * 1024 * 1024) {
+      alert('File size must be less than 50MB')
       return
     }
 
@@ -62,7 +62,8 @@ export default function VideoUploader({ onVideoUploaded, disabled }: VideoUpload
       setUploadProgress(100)
 
       if (!response.ok) {
-        throw new Error('Upload failed')
+        const errorData = await response.json()
+        throw new Error(errorData.error || 'Upload failed')
       }
 
       const result = await response.json()
@@ -73,7 +74,8 @@ export default function VideoUploader({ onVideoUploaded, disabled }: VideoUpload
 
     } catch (error) {
       console.error('Upload error:', error)
-      alert('Failed to upload video. Please try again.')
+      const errorMessage = error instanceof Error ? error.message : 'Failed to upload video. Please try again.'
+      alert(errorMessage)
     } finally {
       setUploading(false)
       setUploadProgress(0)
@@ -175,7 +177,7 @@ export default function VideoUploader({ onVideoUploaded, disabled }: VideoUpload
               
               <div className="inline-flex items-center bg-white/10 rounded-full px-4 py-2 border border-white/20">
                 <span className="text-sm text-gray-200">
-                  Supports: MP4, MOV, AVI, WebM • Max 100MB
+                  Supports: MP4, MOV, AVI, WebM • Max 50MB
                 </span>
               </div>
             </div>
