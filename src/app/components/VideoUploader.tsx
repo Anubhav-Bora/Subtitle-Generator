@@ -46,23 +46,21 @@ export default function VideoUploader({ onVideoUploaded, disabled }: VideoUpload
       const uniqueFilename = `${uuidv4()}.${fileExtension}`
       const storagePath = `videos/${uniqueFilename}`
 
-      // Upload directly to Supabase Storage (bypasses Vercel payload limits)
-      const { data: uploadData, error: uploadError } = await supabase.storage
+      const { error: uploadError } = await supabase.storage
         .from('videos')
         .upload(storagePath, file, {
           cacheControl: '3600',
           upsert: false,
-          onUploadProgress: (progress: any) => {
+          onUploadProgress: (progress: { loaded: number; total: number }) => {
             const percent = (progress.loaded / progress.total) * 100
             setUploadProgress(percent)
           }
-        } as any) // Type assertion to bypass the TypeScript error
+        })
 
       if (uploadError) {
         throw new Error(`Upload failed: ${uploadError.message}`)
       }
 
-      // Save metadata via API
       const response = await fetch('/api/save-video-metadata', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -216,7 +214,7 @@ export default function VideoUploader({ onVideoUploaded, disabled }: VideoUpload
               <div className="w-16 h-16 bg-purple-500 rounded-full flex items-center justify-center mx-auto mb-3">
                 <span className="text-2xl">📥</span>
               </div>
-              <p className="text-xl font-bold text-white">Drop it like it's hot!</p>
+              <p className="text-xl font-bold text-white">Drop it like it&apos;s hot!</p>
             </div>
           </div>
         )}
