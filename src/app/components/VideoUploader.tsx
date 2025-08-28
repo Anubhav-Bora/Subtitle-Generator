@@ -1,6 +1,8 @@
 'use client'
 
 import { useCallback, useState } from 'react'
+import { supabase } from '@/app/lib/supabase'
+import { v4 as uuidv4 } from 'uuid'
 
 interface Video {
   id: string
@@ -26,8 +28,8 @@ export default function VideoUploader({ onVideoUploaded, disabled }: VideoUpload
   const handleFile = useCallback(async (file: File) => {
     if (disabled || uploading) return
 
-    if (file.size > 50 * 1024 * 1024) {
-      alert('File size must be less than 50MB')
+    if (file.size > 100 * 1024 * 1024) {
+      alert('File size must be less than 100MB')
       return
     }
 
@@ -40,36 +42,54 @@ export default function VideoUploader({ onVideoUploaded, disabled }: VideoUpload
     setUploadProgress(0)
 
     try {
-      const formData = new FormData()
-      formData.append('video', file)
+      const fileExtension = file.name.split('.').pop()
+      const uniqueFilename = `${uuidv4()}.${fileExtension}`
+      const storagePath = `videos/${uniqueFilename}`
 
-      const progressInterval = setInterval(() => {
-        setUploadProgress(prev => {
-          if (prev >= 90) {
-            clearInterval(progressInterval)
-            return 90
+      // Upload directly to Supabase Storage (bypasses Vercel payload limits)
+      const { data: uploadData, error: uploadError } = await supabase.storage
+        .from('videos')
+        .upload(storagePath, file, {
+          cacheControl: '3600',
+          upsert: false,
+          onUploadProgress: (progress: any) => {
+            const percent = (progress.loaded / progress.total) * 100
+            setUploadProgress(percent)
           }
-          return prev + Math.random() * 10
-        })
-      }, 500)
+        } as any) // Type assertion to bypass the TypeScript error
 
-      const response = await fetch('/api/upload', {
+      if (uploadError) {
+        throw new Error(`Upload failed: ${uploadError.message}`)
+      }
+
+      // Save metadata via API
+      const response = await fetch('/api/save-video-metadata', {
         method: 'POST',
-        body: formData
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          filename: uniqueFilename,
+          originalName: file.name,
+          fileSize: file.size,
+          mimeType: file.type,
+          storagePath: storagePath
+        })
       })
 
-      clearInterval(progressInterval)
-      setUploadProgress(100)
-
       if (!response.ok) {
-        const errorData = await response.json()
-        throw new Error(errorData.error || 'Upload failed')
+        throw new Error('Failed to save video metadata')
       }
 
       const result = await response.json()
       
+      const { data: urlData } = supabase.storage
+        .from('videos')
+        .getPublicUrl(storagePath)
+
       setTimeout(() => {
-        onVideoUploaded(result)
+        onVideoUploaded({
+          video: result.video,
+          publicUrl: urlData.publicUrl
+        })
       }, 500)
 
     } catch (error) {
@@ -177,7 +197,7 @@ export default function VideoUploader({ onVideoUploaded, disabled }: VideoUpload
               
               <div className="inline-flex items-center bg-white/10 rounded-full px-4 py-2 border border-white/20">
                 <span className="text-sm text-gray-200">
-                  Supports: MP4, MOV, AVI, WebM • Max 50MB
+                  Supports: MP4, MOV, AVI, WebM • Max 100MB
                 </span>
               </div>
             </div>
@@ -196,7 +216,7 @@ export default function VideoUploader({ onVideoUploaded, disabled }: VideoUpload
               <div className="w-16 h-16 bg-purple-500 rounded-full flex items-center justify-center mx-auto mb-3">
                 <span className="text-2xl">📥</span>
               </div>
-              <p className="text-xl font-bold text-white">Drop it like it&apos;s hot! 🔥</p>
+              <p className="text-xl font-bold text-white">Drop it like it's hot!</p>
             </div>
           </div>
         )}
