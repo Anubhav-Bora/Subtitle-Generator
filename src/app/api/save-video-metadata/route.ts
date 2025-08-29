@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { supabaseAdmin, type VideoInsert } from '@/app/lib/supabase'
+import { supabase, type VideoInsert } from '@/app/lib/supabase'
 
 interface SaveVideoRequest {
   filename: string
@@ -21,7 +21,7 @@ export async function POST(request: NextRequest) {
       storage_path: storagePath
     }
 
-    const { data: video, error: dbError } = await supabaseAdmin
+    const { data: video, error: dbError } = await supabase
       .from('videos')
       .insert(videoData)
       .select()

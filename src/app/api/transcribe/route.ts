@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { supabaseAdmin } from '@/app/lib/supabase'
+import { supabase} from '@/app/lib/supabase'
 import { transcribeAudio, getTranscriptionStatus, generateSRT } from '@/app/lib/assemblyai'
 
 export async function POST(request: NextRequest) {
@@ -10,7 +10,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Video ID is required' }, { status: 400 })
     }
 
-    const { data: video, error: videoError } = await supabaseAdmin
+    const { data: video, error: videoError } = await supabase
       .from('videos')
       .select('*')
       .eq('id', videoId)
@@ -20,13 +20,13 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Video not found' }, { status: 404 })
     }
 
-    const { data: urlData } = supabaseAdmin.storage
+    const { data: urlData } = supabase.storage
       .from('videos')
       .getPublicUrl(video.storage_path)
 
     const transcriptId = await transcribeAudio(urlData.publicUrl)
 
-    const { data: transcription, error: transcriptionError } = await supabaseAdmin
+    const { data: transcription, error: transcriptionError } = await supabase
       .from('transcriptions')
       .insert({
         video_id: videoId,
@@ -63,7 +63,7 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: 'Transcription ID required' }, { status: 400 })
     }
 
-    const { data: transcription, error } = await supabaseAdmin
+    const { data: transcription, error } = await supabase
       .from('transcriptions')
       .select('*')
       .eq('id', transcriptionId)
@@ -81,7 +81,7 @@ export async function GET(request: NextRequest) {
       const srtFilename = `${transcription.video_id}.srt`
       const srtPath = `subtitles/${srtFilename}`
 
-      const { error: srtUploadError } = await supabaseAdmin.storage
+      const { error: srtUploadError } = await supabase.storage
         .from('subtitles')
         .upload(srtPath, new Blob([srtContent], { type: 'text/plain' }), {
           upsert: true
@@ -91,7 +91,7 @@ export async function GET(request: NextRequest) {
         console.error('SRT upload error:', srtUploadError)
       }
 
-      await supabaseAdmin
+      await supabase
         .from('transcriptions')
         .update({
           status: 'completed',
@@ -102,7 +102,7 @@ export async function GET(request: NextRequest) {
         })
         .eq('id', transcriptionId)
         
-      const { data: srtUrlData } = supabaseAdmin.storage
+      const { data: srtUrlData } = supabase.storage
         .from('subtitles')
         .getPublicUrl(srtPath)
 
@@ -116,7 +116,7 @@ export async function GET(request: NextRequest) {
     }
 
     if (transcription.status !== result.status) {
-      await supabaseAdmin
+      await supabase
         .from('transcriptions')
         .update({
           status: result.status,

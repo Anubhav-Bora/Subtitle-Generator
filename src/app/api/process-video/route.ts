@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { supabaseAdmin, TranscriptionWithVideo } from '@/app/lib/supabase'
+import { supabase, TranscriptionWithVideo } from '@/app/lib/supabase'
+import { supabaseAdmin } from '@/app/lib/supabase-server' 
 import { processVideoWithSubtitles } from '@/app/lib/VideoProcessor'
 
 export async function POST(request: NextRequest) {
@@ -7,7 +8,7 @@ export async function POST(request: NextRequest) {
     const { transcriptionId, subtitleStyle } = await request.json()
 
     
-    const { data: transcription, error: transcriptionError } = await supabaseAdmin
+    const { data: transcription, error: transcriptionError } = await supabase
       .from('transcriptions')
       .select(`
         *,
@@ -26,18 +27,18 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Transcription not ready for processing' }, { status: 400 })
     }
 
-
-    await supabaseAdmin
+    // Update processing status
+    await supabase
       .from('transcriptions')
       .update({ processing_status: 'processing' })
       .eq('id', transcriptionId)
 
-    
-    const { data: videoUrlData } = supabaseAdmin.storage
+    // Get video URL
+    const { data: videoUrlData } = supabase.storage
       .from('videos')
       .getPublicUrl(transcriptionWithVideo.videos.storage_path)
 
-    
+    // Process video with subtitles
     const processedVideoBase64 = await processVideoWithSubtitles({
       videoUrl: videoUrlData.publicUrl,
       srtContent: transcriptionWithVideo.srt_content,
@@ -45,12 +46,12 @@ export async function POST(request: NextRequest) {
       subtitleStyle
     })
 
-
+    // Upload processed video using ADMIN CLIENT
     const processedVideoBuffer = Buffer.from(processedVideoBase64, 'base64')
     const processedFilename = `processed_${transcriptionWithVideo.videos.filename}`
     const processedPath = `processed-videos/${processedFilename}`
 
-    const { error: uploadError } = await supabaseAdmin.storage
+    const { error: uploadError } = await supabaseAdmin.storage // Use admin client
       .from('processed-videos')
       .upload(processedPath, processedVideoBuffer, {
         contentType: 'video/mp4',
@@ -61,13 +62,14 @@ export async function POST(request: NextRequest) {
       throw new Error(`Failed to upload processed video: ${uploadError.message}`)
     }
 
-    
-    await supabaseAdmin
+    // Update video record with processed path (using regular client is fine for DB operations if RLS allows)
+    await supabase
       .from('videos')
       .update({ processed_video_path: processedPath })
       .eq('id', transcriptionWithVideo.video_id ?? '');
 
-    await supabaseAdmin
+    // Update transcription status
+    await supabase
       .from('transcriptions')
       .update({ 
         processing_status: 'completed',
@@ -75,8 +77,8 @@ export async function POST(request: NextRequest) {
       })
       .eq('id', transcriptionId)
 
-
-    const { data: processedUrlData } = supabaseAdmin.storage
+    // Get public URL for processed video
+    const { data: processedUrlData } = supabaseAdmin.storage // Use admin client for consistency
       .from('processed-videos')
       .getPublicUrl(processedPath)
 
@@ -88,10 +90,10 @@ export async function POST(request: NextRequest) {
   } catch (error) {
     console.error('Video processing error:', error)
     
-
+    // Error handling
     const { transcriptionId } = await request.json().catch(() => ({}))
     if (transcriptionId) {
-      await supabaseAdmin
+      await supabase
         .from('transcriptions')
         .update({ processing_status: 'error' })
         .eq('id', transcriptionId)
@@ -110,7 +112,7 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: 'Transcription ID required' }, { status: 400 })
     }
 
-    const { data: transcription, error } = await supabaseAdmin
+    const { data: transcription, error } = await supabase
       .from('transcriptions')
       .select(`
         processing_status,
@@ -125,13 +127,13 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: 'Transcription not found' }, { status: 404 })
     }
 
-
+    // Get processing status and video data
     const processingStatus = transcription.processing_status
     const videoData = Array.isArray(transcription.videos) ? transcription.videos[0] : transcription.videos
     
     let processedVideoUrl = null
     if (videoData?.processed_video_path) {
-      const { data: urlData } = supabaseAdmin.storage
+      const { data: urlData } = supabaseAdmin.storage // Use admin client for consistent access
         .from('processed-videos')
         .getPublicUrl(videoData.processed_video_path)
       processedVideoUrl = urlData.publicUrl

@@ -14,8 +14,8 @@ const nextConfig: NextConfig = {
       
       config.performance = {
         ...config.performance,
-        maxAssetSize: 100 * 1024 * 1024, // 100MB
-        maxEntrypointSize: 100 * 1024 * 1024 // 100MB
+        maxAssetSize: 100 * 1024 * 1024, 
+        maxEntrypointSize: 100 * 1024 * 1024 
       };
     }
     return config;
