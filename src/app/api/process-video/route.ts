@@ -65,7 +65,7 @@ export async function POST(request: NextRequest) {
     await supabaseAdmin
       .from('videos')
       .update({ processed_video_path: processedPath })
-      .eq('id', transcriptionWithVideo.video_id)
+      .eq('id', transcriptionWithVideo.video_id ?? '');
 
     await supabaseAdmin
       .from('transcriptions')

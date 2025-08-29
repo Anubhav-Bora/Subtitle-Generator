@@ -1,19 +1,29 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { supabaseAdmin } from '@/app/lib/supabase'
+import { supabaseAdmin, type VideoInsert } from '@/app/lib/supabase'
+
+interface SaveVideoRequest {
+  filename: string
+  originalName: string
+  fileSize: number
+  mimeType: string
+  storagePath: string
+}
 
 export async function POST(request: NextRequest) {
   try {
-    const { filename, originalName, fileSize, mimeType, storagePath } = await request.json()
+    const { filename, originalName, fileSize, mimeType, storagePath }: SaveVideoRequest = await request.json()
 
-    const { data: videoData, error: dbError } = await supabaseAdmin
+    const videoData: VideoInsert = {
+      filename,
+      original_name: originalName,
+      file_size: fileSize,
+      mime_type: mimeType,
+      storage_path: storagePath
+    }
+
+    const { data: video, error: dbError } = await supabaseAdmin
       .from('videos')
-      .insert({
-        filename: filename,
-        original_name: originalName,
-        file_size: fileSize,
-        mime_type: mimeType,
-        storage_path: storagePath
-      })
+      .insert(videoData)
       .select()
       .single()
 
@@ -24,7 +34,7 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json({
       success: true,
-      video: videoData
+      video
     })
 
   } catch (error) {
