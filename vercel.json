@@ -1,18 +1,4 @@
 {
   "version": 2,
-  "functions": {
-    "app/api/process-video/route.ts": {
-      "maxDuration": 300
-    },
-    "app/api/save-video-metadata/route.ts": {
-      "maxDuration": 300
-    },
-    "app/api/transcribe/route.ts": {
-      "maxDuration": 300
-    },
-    "app/api/upload/route.ts": {
-      "maxDuration": 300
-    }
-  },
   "regions": ["iad1"]
 }
