@@ -1,9 +1,10 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
+  // Tell Next.js to look in src directory
+  pageExtensions: ['ts', 'tsx'],
   
   experimental: {
-    
     serverActions: {
       bodySizeLimit: '100mb'
     }
@@ -11,7 +12,6 @@ const nextConfig: NextConfig = {
   
   webpack: (config, { isServer }) => {
     if (isServer) {
-      
       config.performance = {
         ...config.performance,
         maxAssetSize: 100 * 1024 * 1024, 
@@ -20,7 +20,6 @@ const nextConfig: NextConfig = {
     }
     return config;
   },
-
 
   async headers() {
     return [
