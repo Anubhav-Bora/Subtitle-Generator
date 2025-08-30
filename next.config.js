@@ -1,9 +1,5 @@
-import type { NextConfig } from "next";
-
-const nextConfig: NextConfig = {
-  // Tell Next.js to look in src directory
-  pageExtensions: ['ts', 'tsx'],
-  
+/** @type {import('next').NextConfig} */
+const nextConfig = {
   experimental: {
     serverActions: {
       bodySizeLimit: '100mb'
@@ -14,8 +10,8 @@ const nextConfig: NextConfig = {
     if (isServer) {
       config.performance = {
         ...config.performance,
-        maxAssetSize: 100 * 1024 * 1024, 
-        maxEntrypointSize: 100 * 1024 * 1024 
+        maxAssetSize: 100 * 1024 * 1024,
+        maxEntrypointSize: 100 * 1024 * 1024
       };
     }
     return config;
@@ -31,7 +27,7 @@ const nextConfig: NextConfig = {
             value: '*'
           },
           {
-            key: 'Access-Control-Allow-Methods',
+            key: 'Access-Control-Allow-Methods', 
             value: 'GET, POST, PUT, DELETE, OPTIONS'
           },
           {
@@ -44,4 +40,4 @@ const nextConfig: NextConfig = {
   }
 };
 
-export default nextConfig;
+module.exports = nextConfig;
