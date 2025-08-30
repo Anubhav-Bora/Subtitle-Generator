@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { supabase, TranscriptionWithVideo } from '@/app/lib/supabase'
-import { supabaseAdmin } from '@/app/lib/supabase-server'
+import { supabase, TranscriptionWithVideo } from '../../lib/supabase'
+import { supabaseAdmin } from '../../lib/supabase-server'
 
 
 export const maxDuration = 300
@@ -67,7 +67,7 @@ export async function POST(request: NextRequest) {
           note: 'Video processing not available in serverless environment. Use SRT file for subtitles.'
         })
       }
-      const { processVideoWithSubtitles } = await import('@/app/lib/VideoProcessor')
+      const { processVideoWithSubtitles } = await import('../../lib/VideoProcessor')
       
       const { data: videoUrlData } = supabase.storage
         .from('videos')

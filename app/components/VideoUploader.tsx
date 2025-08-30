@@ -1,7 +1,7 @@
 'use client'
 
 import { useCallback, useState } from 'react'
-import { supabase } from '@/app/lib/supabase'
+import { supabase } from '../lib/supabase'
 import { v4 as uuidv4 } from 'uuid'
 
 interface Video {

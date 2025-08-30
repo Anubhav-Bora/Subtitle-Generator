@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { supabase, type VideoInsert } from '@/app/lib/supabase'
+import { supabase, type VideoInsert } from '../../lib/supabase'
 
 interface SaveVideoRequest {
   filename: string

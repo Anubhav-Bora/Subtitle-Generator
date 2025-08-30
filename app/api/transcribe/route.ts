@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { supabase } from '@/app/lib/supabase'
-import { supabaseAdmin } from '@/app/lib/supabase-server'
-import { transcribeAudio, getTranscriptionStatus, generateSRT } from '@/app/lib/assemblyai'
+import { supabase } from '../../lib/supabase'
+import { supabaseAdmin } from '../../lib/supabase-server'
+import { transcribeAudio, getTranscriptionStatus, generateSRT } from '../../lib/assemblyai'
 
 // Add maxDuration for longer operations
 export const maxDuration = 300
