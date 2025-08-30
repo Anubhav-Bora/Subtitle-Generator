@@ -27,6 +27,8 @@ interface TranscriptionState {
   srtUrl?: string
   text?: string
   processedVideoUrl?: string
+  isServerless?: boolean
+  warning?: string
 }
 
 interface SubtitleStyle {
@@ -45,6 +47,7 @@ export default function Home() {
   const [isProcessing, setIsProcessing] = useState(false)
   const [isProcessingVideo, setIsProcessingVideo] = useState(false)
   const [showVideoProcessing, setShowVideoProcessing] = useState(false)
+  const [error, setError] = useState<string | null>(null)
   
   const [subtitleStyle, setSubtitleStyle] = useState<SubtitleStyle>({
     fontName: 'Arial',
@@ -60,6 +63,12 @@ export default function Home() {
     const poll = async () => {
       try {
         const response = await fetch(`/api/transcribe?id=${transcriptionId}`)
+        
+        if (!response.ok) {
+          const errorData = await response.json()
+          throw new Error(errorData.error || 'Failed to check transcription status')
+        }
+        
         const result = await response.json()
 
         setTranscription(prev => prev ? { ...prev, status: result.status } : null)
@@ -70,17 +79,21 @@ export default function Home() {
             status: 'completed',
             srtUrl: result.srtUrl,
             text: result.text,
-            processingStatus: 'pending'
+            processingStatus: 'pending',
+            warning: result.warning
           } : null)
           setIsProcessing(false)
           setShowVideoProcessing(true)
+          setError(null)
         } else if (result.status === 'error') {
+          setError('Transcription failed. Please try again.')
           setIsProcessing(false)
         } else {
           setTimeout(poll, 3000)
         }
       } catch (error) {
         console.error('Polling error:', error)
+        setError('Failed to check transcription status')
         setIsProcessing(false)
       }
     }
@@ -92,6 +105,12 @@ export default function Home() {
     const poll = async () => {
       try {
         const response = await fetch(`/api/process-video?id=${transcriptionId}`)
+        
+        if (!response.ok) {
+          const errorData = await response.json()
+          throw new Error(errorData.error || 'Failed to check video processing status')
+        }
+        
         const result = await response.json()
 
         setTranscription(prev => prev ? { 
@@ -102,13 +121,16 @@ export default function Home() {
 
         if (result.status === 'completed') {
           setIsProcessingVideo(false)
+          setError(null)
         } else if (result.status === 'error') {
+          setError('Video processing failed')
           setIsProcessingVideo(false)
         } else {
           setTimeout(poll, 5000)
         }
       } catch (error) {
         console.error('Video processing polling error:', error)
+        setError('Failed to check video processing status')
         setIsProcessingVideo(false)
       }
     }
@@ -119,6 +141,7 @@ export default function Home() {
   const handleVideoUploaded = useCallback(async (uploadResult: VideoData) => {
     setVideoData(uploadResult)
     setIsProcessing(true)
+    setError(null)
 
     try {
       const response = await fetch('/api/transcribe', {
@@ -126,6 +149,11 @@ export default function Home() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ videoId: uploadResult.video.id })
       })
+
+      if (!response.ok) {
+        const errorData = await response.json()
+        throw new Error(errorData.error || 'Failed to start transcription')
+      }
 
       const result = await response.json()
       
@@ -137,6 +165,7 @@ export default function Home() {
       pollTranscription(result.transcriptionId)
     } catch (error) {
       console.error('Transcription error:', error)
+      setError(error instanceof Error ? error.message : 'Failed to start transcription')
       setIsProcessing(false)
     }
   }, [pollTranscription])
@@ -145,6 +174,8 @@ export default function Home() {
     if (!transcription) return
 
     setIsProcessingVideo(true)
+    setError(null)
+    
     try {
       const response = await fetch('/api/process-video', {
         method: 'POST',
@@ -156,17 +187,33 @@ export default function Home() {
       })
 
       if (!response.ok) {
-        throw new Error('Failed to start video processing')
+        const errorData = await response.json()
+        throw new Error(errorData.error || 'Failed to start video processing')
       }
 
-      setTranscription(prev => prev ? {
-        ...prev,
-        processingStatus: 'processing'
-      } : null)
+      const result = await response.json()
 
-      pollVideoProcessing(transcription.id)
+      // Check if we're in serverless mode
+      if (result.note || result.warning) {
+        setTranscription(prev => prev ? {
+          ...prev,
+          processingStatus: 'completed',
+          processedVideoUrl: result.processedVideoUrl,
+          isServerless: true,
+          warning: result.note || result.warning
+        } : null)
+        setIsProcessingVideo(false)
+      } else {
+        setTranscription(prev => prev ? {
+          ...prev,
+          processingStatus: 'processing'
+        } : null)
+        pollVideoProcessing(transcription.id)
+      }
+
     } catch (error) {
       console.error('Video processing error:', error)
+      setError(error instanceof Error ? error.message : 'Failed to process video')
       setIsProcessingVideo(false)
     }
   }, [transcription, subtitleStyle, pollVideoProcessing])
@@ -177,6 +224,7 @@ export default function Home() {
     setIsProcessing(false)
     setIsProcessingVideo(false)
     setShowVideoProcessing(false)
+    setError(null)
   }, [])
 
   return (
@@ -194,10 +242,26 @@ export default function Home() {
           </p>
         </div>
 
+        {error && (
+          <div className="bg-red-500/20 border border-red-400/40 rounded-2xl p-6 mb-8 text-center backdrop-blur-sm">
+            <div className="w-12 h-12 bg-red-500/30 rounded-full flex items-center justify-center mx-auto mb-3">
+              <span className="text-xl">⚠️</span>
+            </div>
+            <h3 className="text-lg font-bold text-white mb-2">Error</h3>
+            <p className="text-red-200">{error}</p>
+            <button
+              onClick={() => setError(null)}
+              className="mt-4 px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-lg font-medium transition-colors"
+            >
+              Dismiss
+            </button>
+          </div>
+        )}
+
         <div className="space-y-8">
           {!videoData && (
             <div className="bg-white/10 backdrop-blur-lg rounded-2xl border border-white/20 shadow-2xl p-8">
-              <VideoUploader onVideoUploaded={handleVideoUploaded} />
+              <VideoUploader onVideoUploaded={handleVideoUploaded} disabled={isProcessing} />
             </div>
           )}
 
@@ -235,6 +299,15 @@ export default function Home() {
 
           {transcription?.status === 'completed' && (
             <div className="bg-white/10 backdrop-blur-lg rounded-2xl border border-white/20 shadow-2xl p-8">
+              {transcription.warning && (
+                <div className="bg-yellow-500/20 border border-yellow-400/40 rounded-xl p-4 mb-6">
+                  <div className="flex items-center text-yellow-200">
+                    <span className="mr-2">⚠️</span>
+                    <span className="font-medium">{transcription.warning}</span>
+                  </div>
+                </div>
+              )}
+
               <h2 className="text-3xl font-bold text-white mb-8 flex items-center">
                 <span className="mr-3">⚙️</span>
                 Subtitle Options
@@ -246,15 +319,21 @@ export default function Home() {
                     <span className="mr-2">💾</span>
                     Download Files
                   </h3>
-                  <a
-                    href={transcription.srtUrl}
-                    download
-                    className="group bg-gradient-to-r from-blue-500 to-blue-600 hover:from-blue-600 hover:to-blue-700 text-white px-6 py-4 rounded-xl font-semibold transition-all duration-200 flex items-center justify-center space-x-3 shadow-lg hover:shadow-xl transform hover:-translate-y-0.5"
-                  >
-                    <span className="text-lg">📄</span>
-                    <span>Download SRT File</span>
-                    <span className="opacity-70 group-hover:opacity-100 transition-opacity">→</span>
-                  </a>
+                  {transcription.srtUrl ? (
+                    <a
+                      href={transcription.srtUrl}
+                      download
+                      className="group bg-gradient-to-r from-blue-500 to-blue-600 hover:from-blue-600 hover:to-blue-700 text-white px-6 py-4 rounded-xl font-semibold transition-all duration-200 flex items-center justify-center space-x-3 shadow-lg hover:shadow-xl transform hover:-translate-y-0.5"
+                    >
+                      <span className="text-lg">📄</span>
+                      <span>Download SRT File</span>
+                      <span className="opacity-70 group-hover:opacity-100 transition-opacity">→</span>
+                    </a>
+                  ) : (
+                    <div className="text-center text-gray-400 py-4">
+                      SRT file not available
+                    </div>
+                  )}
                 </div>
 
                 <div className="bg-white/5 rounded-xl p-6 border border-white/10">
@@ -273,6 +352,17 @@ export default function Home() {
                     </button>
                   ) : (
                     <div className="space-y-6">
+                      {transcription.isServerless && (
+                        <div className="bg-blue-500/20 border border-blue-400/40 rounded-xl p-4 mb-4">
+                          <div className="flex items-center text-blue-200">
+                            <span className="mr-2">ℹ️</span>
+                            <span className="font-medium">
+                              Video embedding not available in production. Download the SRT file to add subtitles manually.
+                            </span>
+                          </div>
+                        </div>
+                      )}
+
                       <div className="bg-white/10 rounded-xl p-6 border border-white/20">
                         <h4 className="text-lg font-bold text-white mb-4 flex items-center">
                           <span className="mr-2">🎨</span>
@@ -292,6 +382,7 @@ export default function Home() {
                                 fontSize: parseInt(e.target.value)
                               }))}
                               className="w-full h-2 bg-white/20 rounded-lg appearance-none cursor-pointer slider"
+                              disabled={transcription.isServerless}
                             />
                             <div className="mt-2 text-center">
                               <span className="inline-flex items-center bg-blue-500/20 text-blue-200 px-3 py-1 rounded-full text-sm font-medium">
@@ -309,6 +400,7 @@ export default function Home() {
                                 position: e.target.value as 'bottom' | 'top' | 'center'
                               }))}
                               className="w-full p-3 bg-white/10 border border-white/30 rounded-xl text-white font-medium focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+                              disabled={transcription.isServerless}
                             >
                               <option value="bottom" className="bg-gray-800">Bottom</option>
                               <option value="center" className="bg-gray-800">Center</option>
@@ -325,6 +417,7 @@ export default function Home() {
                                 fontColor: e.target.value
                               }))}
                               className="w-full p-3 bg-white/10 border border-white/30 rounded-xl text-white font-medium focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+                              disabled={transcription.isServerless}
                             >
                               <option value="white" className="bg-gray-800">White</option>
                               <option value="yellow" className="bg-gray-800">Yellow</option>
@@ -346,6 +439,7 @@ export default function Home() {
                                 outlineWidth: parseInt(e.target.value)
                               }))}
                               className="w-full h-2 bg-white/20 rounded-lg appearance-none cursor-pointer slider"
+                              disabled={transcription.isServerless}
                             />
                             <div className="mt-2 text-center">
                               <span className="inline-flex items-center bg-purple-500/20 text-purple-200 px-3 py-1 rounded-full text-sm font-medium">
@@ -356,30 +450,32 @@ export default function Home() {
                         </div>
                       </div>
 
-                      <button
-                        onClick={handleProcessVideo}
-                        disabled={isProcessingVideo}
-                        className="group bg-gradient-to-r from-purple-500 to-pink-500 hover:from-purple-600 hover:to-pink-600 disabled:from-gray-500 disabled:to-gray-600 disabled:cursor-not-allowed text-white px-8 py-4 rounded-xl font-bold transition-all duration-200 flex items-center justify-center space-x-3 w-full shadow-lg hover:shadow-xl transform hover:-translate-y-0.5 disabled:transform-none text-lg"
-                      >
-                        {isProcessingVideo ? (
-                          <>
-                            <div className="animate-spin w-5 h-5 border-2 border-white border-t-transparent rounded-full"></div>
-                            <span>Processing Video...</span>
-                          </>
-                        ) : (
-                          <>
-                            <span className="text-xl">🎬</span>
-                            <span>Generate Video with Subtitles</span>
-                            <span className="opacity-70 group-hover:opacity-100 transition-opacity">✨</span>
-                          </>
-                        )}
-                      </button>
+                      {!transcription.isServerless && (
+                        <button
+                          onClick={handleProcessVideo}
+                          disabled={isProcessingVideo}
+                          className="group bg-gradient-to-r from-purple-500 to-pink-500 hover:from-purple-600 hover:to-pink-600 disabled:from-gray-500 disabled:to-gray-600 disabled:cursor-not-allowed text-white px-8 py-4 rounded-xl font-bold transition-all duration-200 flex items-center justify-center space-x-3 w-full shadow-lg hover:shadow-xl transform hover:-translate-y-0.5 disabled:transform-none text-lg"
+                        >
+                          {isProcessingVideo ? (
+                            <>
+                              <div className="animate-spin w-5 h-5 border-2 border-white border-t-transparent rounded-full"></div>
+                              <span>Processing Video...</span>
+                            </>
+                          ) : (
+                            <>
+                              <span className="text-xl">🎬</span>
+                              <span>Generate Video with Subtitles</span>
+                              <span className="opacity-70 group-hover:opacity-100 transition-opacity">✨</span>
+                            </>
+                          )}
+                        </button>
+                      )}
                     </div>
                   )}
                 </div>
               </div>
 
-              {isProcessingVideo && (
+              {isProcessingVideo && !transcription.isServerless && (
                 <div className="bg-gradient-to-r from-purple-500/20 to-pink-500/20 border border-purple-400/30 rounded-xl p-6 text-center backdrop-blur-sm">
                   <div className="flex items-center justify-center mb-4">
                     <div className="animate-spin w-8 h-8 border-4 border-purple-400 border-t-transparent rounded-full mr-3"></div>
@@ -401,7 +497,9 @@ export default function Home() {
                   <div className="text-center mb-6">
                     <div className="inline-flex items-center bg-green-500/20 text-green-200 px-4 py-2 rounded-full border border-green-400/30">
                       <span className="mr-2">✅</span>
-                      <span className="font-bold">Video Ready for Download!</span>
+                      <span className="font-bold">
+                        {transcription.isServerless ? 'Files Ready for Download!' : 'Video Ready for Download!'}
+                      </span>
                     </div>
                   </div>
                   
@@ -409,13 +507,18 @@ export default function Home() {
                     <div className="bg-white/5 rounded-xl p-6 border border-white/10">
                       <h4 className="text-lg font-bold text-white mb-4 flex items-center">
                         <span className="mr-2">👀</span>
-                        Preview Processed Video
+                        Preview {transcription.isServerless ? 'Original' : 'Processed'} Video
                       </h4>
                       <video
                         src={transcription.processedVideoUrl}
                         controls
                         className="w-full rounded-xl shadow-lg border-2 border-white/20"
                       />
+                      {transcription.isServerless && (
+                        <p className="text-sm text-gray-300 mt-2">
+                          Use the SRT file below to add subtitles in your video editor
+                        </p>
+                      )}
                     </div>
                     
                     <div className="bg-white/5 rounded-xl p-6 border border-white/10">
@@ -431,19 +534,21 @@ export default function Home() {
                           className="group bg-gradient-to-r from-green-500 to-emerald-500 hover:from-green-600 hover:to-emerald-600 text-white px-6 py-4 rounded-xl font-bold transition-all duration-200 flex items-center justify-center space-x-3 shadow-lg hover:shadow-xl transform hover:-translate-y-0.5"
                         >
                           <span className="text-lg">📹</span>
-                          <span>Video with Subtitles</span>
+                          <span>{transcription.isServerless ? 'Original Video' : 'Video with Subtitles'}</span>
                           <span className="opacity-70 group-hover:opacity-100 transition-opacity">⬇️</span>
                         </a>
                         
-                        <a
-                          href={transcription.srtUrl}
-                          download
-                          className="group bg-gradient-to-r from-blue-500 to-cyan-500 hover:from-blue-600 hover:to-cyan-600 text-white px-6 py-4 rounded-xl font-bold transition-all duration-200 flex items-center justify-center space-x-3 shadow-lg hover:shadow-xl transform hover:-translate-y-0.5"
-                        >
-                          <span className="text-lg">📄</span>
-                          <span>SRT File Only</span>
-                          <span className="opacity-70 group-hover:opacity-100 transition-opacity">⬇️</span>
-                        </a>
+                        {transcription.srtUrl && (
+                          <a
+                            href={transcription.srtUrl}
+                            download
+                            className="group bg-gradient-to-r from-blue-500 to-cyan-500 hover:from-blue-600 hover:to-cyan-600 text-white px-6 py-4 rounded-xl font-bold transition-all duration-200 flex items-center justify-center space-x-3 shadow-lg hover:shadow-xl transform hover:-translate-y-0.5"
+                          >
+                            <span className="text-lg">📄</span>
+                            <span>SRT File</span>
+                            <span className="opacity-70 group-hover:opacity-100 transition-opacity">⬇️</span>
+                          </a>
+                        )}
                       </div>
 
                       <div className="bg-white/10 rounded-lg p-4 border border-white/20">
@@ -454,20 +559,30 @@ export default function Home() {
                         <ul className="text-gray-200 text-sm space-y-2">
                           <li className="flex items-center">
                             <span className="w-2 h-2 bg-green-400 rounded-full mr-3"></span>
-                            Original video with burned-in subtitles
+                            {transcription.isServerless ? 'Original video file' : 'Original video with burned-in subtitles'}
                           </li>
                           <li className="flex items-center">
                             <span className="w-2 h-2 bg-blue-400 rounded-full mr-3"></span>
                             Separate SRT file for external use
                           </li>
-                          <li className="flex items-center">
-                            <span className="w-2 h-2 bg-purple-400 rounded-full mr-3"></span>
-                            Custom styling applied
-                          </li>
-                          <li className="flex items-center">
-                            <span className="w-2 h-2 bg-pink-400 rounded-full mr-3"></span>
-                            Ready for social media or presentations
-                          </li>
+                          {!transcription.isServerless && (
+                            <>
+                              <li className="flex items-center">
+                                <span className="w-2 h-2 bg-purple-400 rounded-full mr-3"></span>
+                                Custom styling applied
+                              </li>
+                              <li className="flex items-center">
+                                <span className="w-2 h-2 bg-pink-400 rounded-full mr-3"></span>
+                                Ready for social media or presentations
+                              </li>
+                            </>
+                          )}
+                          {transcription.isServerless && (
+                            <li className="flex items-center">
+                              <span className="w-2 h-2 bg-yellow-400 rounded-full mr-3"></span>
+                              Compatible with all video editing software
+                            </li>
+                          )}
                         </ul>
                       </div>
                     </div>
@@ -525,9 +640,9 @@ export default function Home() {
               <div className="w-16 h-16 bg-gradient-to-br from-purple-500 to-pink-500 rounded-2xl flex items-center justify-center mx-auto mb-4 group-hover:scale-110 transition-transform duration-200">
                 <span className="text-2xl">🎬</span>
               </div>
-              <h3 className="text-xl font-bold text-white mb-3">Embedded Subtitles</h3>
+              <h3 className="text-xl font-bold text-white mb-3">Video Processing</h3>
               <p className="text-gray-300 leading-relaxed">
-                Videos with permanent subtitles burned-in, perfect for social media and presentations
+                Advanced AI transcription with high accuracy speech recognition technology
               </p>
             </div>
             
@@ -535,9 +650,9 @@ export default function Home() {
               <div className="w-16 h-16 bg-gradient-to-br from-green-500 to-emerald-500 rounded-2xl flex items-center justify-center mx-auto mb-4 group-hover:scale-110 transition-transform duration-200">
                 <span className="text-2xl">🎨</span>
               </div>
-              <h3 className="text-xl font-bold text-white mb-3">Custom Styling</h3>
+              <h3 className="text-xl font-bold text-white mb-3">Multiple Formats</h3>
               <p className="text-gray-300 leading-relaxed">
-                Customize font, size, color, and position to match your brand and style preferences
+                Get both SRT files and original video for maximum compatibility across platforms
               </p>
             </div>
           </div>
@@ -564,6 +679,16 @@ export default function Home() {
           cursor: pointer;
           border: 2px solid white;
           box-shadow: 0 4px 8px rgba(0,0,0,0.3);
+        }
+
+        .slider:disabled::-webkit-slider-thumb {
+          background: #666;
+          cursor: not-allowed;
+        }
+
+        .slider:disabled::-moz-range-thumb {
+          background: #666;
+          cursor: not-allowed;
         }
 
         .animation-delay-200 {

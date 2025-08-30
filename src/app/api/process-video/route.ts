@@ -1,13 +1,19 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabase, TranscriptionWithVideo } from '@/app/lib/supabase'
-import { supabaseAdmin } from '@/app/lib/supabase-server' 
-import { processVideoWithSubtitles } from '@/app/lib/VideoProcessor'
+import { supabaseAdmin } from '@/app/lib/supabase-server'
+
+// Add maxDuration for video processing
+export const maxDuration = 300
 
 export async function POST(request: NextRequest) {
   try {
     const { transcriptionId, subtitleStyle } = await request.json()
 
-    
+    if (!transcriptionId) {
+      return NextResponse.json({ error: 'Transcription ID is required' }, { status: 400 })
+    }
+
+    // Get transcription with video data
     const { data: transcription, error: transcriptionError } = await supabase
       .from('transcriptions')
       .select(`
@@ -18,6 +24,7 @@ export async function POST(request: NextRequest) {
       .single()
 
     if (transcriptionError || !transcription) {
+      console.error('Transcription fetch error:', transcriptionError)
       return NextResponse.json({ error: 'Transcription not found' }, { status: 404 })
     }
 
@@ -33,73 +40,154 @@ export async function POST(request: NextRequest) {
       .update({ processing_status: 'processing' })
       .eq('id', transcriptionId)
 
-    // Get video URL
-    const { data: videoUrlData } = supabase.storage
-      .from('videos')
-      .getPublicUrl(transcriptionWithVideo.videos.storage_path)
+    try {
+      // Check if we're in a serverless environment where FFmpeg isn't available
+      const isServerless = process.env.VERCEL || process.env.NETLIFY || process.env.AWS_LAMBDA_FUNCTION_NAME
 
-    // Process video with subtitles
-    const processedVideoBase64 = await processVideoWithSubtitles({
-      videoUrl: videoUrlData.publicUrl,
-      srtContent: transcriptionWithVideo.srt_content,
-      outputFormat: 'mp4',
-      subtitleStyle
-    })
+      if (isServerless) {
+        // For serverless environments, we'll create a "processed" video that's actually just the original
+        // with a reference to the SRT file for client-side subtitle rendering
+        const originalVideoUrl = supabase.storage
+          .from('videos')
+          .getPublicUrl(transcriptionWithVideo.videos.storage_path).data.publicUrl
 
-    // Upload processed video using ADMIN CLIENT
-    const processedVideoBuffer = Buffer.from(processedVideoBase64, 'base64')
-    const processedFilename = `processed_${transcriptionWithVideo.videos.filename}`
-    const processedPath = `processed-videos/${processedFilename}`
+        // Update video record to indicate "processing complete" but no actual processing done
+        await supabase
+          .from('videos')
+          .update({ 
+            processed_video_path: transcriptionWithVideo.videos.storage_path // Use original path
+          })
+          .eq('id', transcriptionWithVideo.video_id ?? '')
 
-    const { error: uploadError } = await supabaseAdmin.storage // Use admin client
-      .from('processed-videos')
-      .upload(processedPath, processedVideoBuffer, {
-        contentType: 'video/mp4',
-        upsert: true
+        // Update transcription status
+        await supabase
+          .from('transcriptions')
+          .update({ 
+            processing_status: 'completed',
+            updated_at: new Date().toISOString()
+          })
+          .eq('id', transcriptionId)
+
+        return NextResponse.json({
+          success: true,
+          processedVideoUrl: originalVideoUrl,
+          note: 'Video processing not available in serverless environment. Use SRT file for subtitles.'
+        })
+      }
+
+      // For environments with FFmpeg support (local development)
+      const { processVideoWithSubtitles } = await import('@/app/lib/VideoProcessor')
+      
+      const { data: videoUrlData } = supabase.storage
+        .from('videos')
+        .getPublicUrl(transcriptionWithVideo.videos.storage_path)
+
+      // Process video with subtitles
+      const processedVideoBase64 = await processVideoWithSubtitles({
+        videoUrl: videoUrlData.publicUrl,
+        srtContent: transcriptionWithVideo.srt_content,
+        outputFormat: 'mp4',
+        subtitleStyle
       })
 
-    if (uploadError) {
-      throw new Error(`Failed to upload processed video: ${uploadError.message}`)
+      // Upload processed video using ADMIN CLIENT
+      const processedVideoBuffer = Buffer.from(processedVideoBase64, 'base64')
+      const processedFilename = `processed_${transcriptionWithVideo.videos.filename}`
+      const processedPath = `processed-videos/${processedFilename}`
+
+      const { error: uploadError } = await supabaseAdmin.storage
+        .from('processed-videos')
+        .upload(processedPath, processedVideoBuffer, {
+          contentType: 'video/mp4',
+          upsert: true
+        })
+
+      if (uploadError) {
+        throw new Error(`Failed to upload processed video: ${uploadError.message}`)
+      }
+
+      // Update video record with processed path
+      await supabase
+        .from('videos')
+        .update({ processed_video_path: processedPath })
+        .eq('id', transcriptionWithVideo.video_id ?? '')
+
+      // Update transcription status
+      await supabase
+        .from('transcriptions')
+        .update({ 
+          processing_status: 'completed',
+          updated_at: new Date().toISOString()
+        })
+        .eq('id', transcriptionId)
+
+      // Get public URL for processed video
+      const { data: processedUrlData } = supabaseAdmin.storage
+        .from('processed-videos')
+        .getPublicUrl(processedPath)
+
+      return NextResponse.json({
+        success: true,
+        processedVideoUrl: processedUrlData.publicUrl
+      })
+
+    } catch (processingError) {
+      console.error('Video processing failed:', processingError)
+      
+      // Fallback: mark as completed but use original video
+      const originalVideoUrl = supabase.storage
+        .from('videos')
+        .getPublicUrl(transcriptionWithVideo.videos.storage_path).data.publicUrl
+
+      await supabase
+        .from('transcriptions')
+        .update({ 
+          processing_status: 'completed',
+          updated_at: new Date().toISOString()
+        })
+        .eq('id', transcriptionId)
+
+      await supabase
+        .from('videos')
+        .update({ 
+          processed_video_path: transcriptionWithVideo.videos.storage_path
+        })
+        .eq('id', transcriptionWithVideo.video_id ?? '')
+
+      return NextResponse.json({
+        success: true,
+        processedVideoUrl: originalVideoUrl,
+        warning: 'Video processing failed, returning original video with separate SRT file'
+      })
     }
-
-    // Update video record with processed path (using regular client is fine for DB operations if RLS allows)
-    await supabase
-      .from('videos')
-      .update({ processed_video_path: processedPath })
-      .eq('id', transcriptionWithVideo.video_id ?? '');
-
-    // Update transcription status
-    await supabase
-      .from('transcriptions')
-      .update({ 
-        processing_status: 'completed',
-        updated_at: new Date().toISOString()
-      })
-      .eq('id', transcriptionId)
-
-    // Get public URL for processed video
-    const { data: processedUrlData } = supabaseAdmin.storage // Use admin client for consistency
-      .from('processed-videos')
-      .getPublicUrl(processedPath)
-
-    return NextResponse.json({
-      success: true,
-      processedVideoUrl: processedUrlData.publicUrl
-    })
 
   } catch (error) {
     console.error('Video processing error:', error)
     
-    // Error handling
-    const { transcriptionId } = await request.json().catch(() => ({}))
-    if (transcriptionId) {
-      await supabase
-        .from('transcriptions')
-        .update({ processing_status: 'error' })
-        .eq('id', transcriptionId)
+    // Error handling - always try to parse transcriptionId
+    let transcriptionId: string | null = null
+    try {
+      const body = await request.clone().json()
+      transcriptionId = body.transcriptionId
+    } catch (parseError) {
+      console.error('Could not parse request body for error handling:', parseError)
     }
 
-    return NextResponse.json({ error: 'Failed to process video' }, { status: 500 })
+  if (transcriptionId) {
+  try {
+    await supabase
+      .from('transcriptions')
+      .update({ processing_status: 'error' })
+      .eq('id', transcriptionId);
+  } catch (err) {
+    console.error('Error updating transcription status:', err);
+  }
+}
+
+    return NextResponse.json({ 
+      error: 'Failed to process video',
+      details: process.env.NODE_ENV === 'development' ? (error as Error).message : undefined
+    }, { status: 500 })
   }
 }
 
@@ -124,6 +212,7 @@ export async function GET(request: NextRequest) {
       .single()
 
     if (error || !transcription) {
+      console.error('Transcription status fetch error:', error)
       return NextResponse.json({ error: 'Transcription not found' }, { status: 404 })
     }
 
@@ -133,9 +222,18 @@ export async function GET(request: NextRequest) {
     
     let processedVideoUrl = null
     if (videoData?.processed_video_path) {
-      const { data: urlData } = supabaseAdmin.storage // Use admin client for consistent access
-        .from('processed-videos')
-        .getPublicUrl(videoData.processed_video_path)
+      // Try to get URL from processed-videos bucket first, then fallback to videos bucket
+      let urlData
+      try {
+        urlData = supabaseAdmin.storage
+          .from('processed-videos')
+          .getPublicUrl(videoData.processed_video_path).data
+      } catch (e) {
+        // Fallback to videos bucket if processed-videos fails
+        urlData = supabaseAdmin.storage
+          .from('videos')
+          .getPublicUrl(videoData.processed_video_path).data
+      }
       processedVideoUrl = urlData.publicUrl
     }
 
@@ -146,6 +244,9 @@ export async function GET(request: NextRequest) {
 
   } catch (error) {
     console.error('Processing status check error:', error)
-    return NextResponse.json({ error: 'Failed to check processing status' }, { status: 500 })
+    return NextResponse.json({ 
+      error: 'Failed to check processing status',
+      details: process.env.NODE_ENV === 'development' ? (error as Error).message : undefined
+    }, { status: 500 })
   }
 }
