@@ -1,6 +1,6 @@
 // This file should ONLY be imported in API routes (server-side)
 import { createClient } from '@supabase/supabase-js'
-import type { Database } from '../../../lib/database.types'
+import type { Database } from './database.types'
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL
 const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY

@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { supabase, TranscriptionWithVideo } from '@/app/lib/supabase'
 import { supabaseAdmin } from '@/app/lib/supabase-server'
 
-// Add maxDuration for video processing
+
 export const maxDuration = 300
 
 export async function POST(request: NextRequest) {
@@ -13,7 +13,6 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Transcription ID is required' }, { status: 400 })
     }
 
-    // Get transcription with video data
     const { data: transcription, error: transcriptionError } = await supabase
       .from('transcriptions')
       .select(`
@@ -34,32 +33,26 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Transcription not ready for processing' }, { status: 400 })
     }
 
-    // Update processing status
     await supabase
       .from('transcriptions')
       .update({ processing_status: 'processing' })
       .eq('id', transcriptionId)
 
     try {
-      // Check if we're in a serverless environment where FFmpeg isn't available
+
       const isServerless = process.env.VERCEL || process.env.NETLIFY || process.env.AWS_LAMBDA_FUNCTION_NAME
 
       if (isServerless) {
-        // For serverless environments, we'll create a "processed" video that's actually just the original
-        // with a reference to the SRT file for client-side subtitle rendering
         const originalVideoUrl = supabase.storage
           .from('videos')
           .getPublicUrl(transcriptionWithVideo.videos.storage_path).data.publicUrl
-
-        // Update video record to indicate "processing complete" but no actual processing done
         await supabase
           .from('videos')
           .update({ 
-            processed_video_path: transcriptionWithVideo.videos.storage_path // Use original path
+            processed_video_path: transcriptionWithVideo.videos.storage_path 
           })
           .eq('id', transcriptionWithVideo.video_id ?? '')
 
-        // Update transcription status
         await supabase
           .from('transcriptions')
           .update({ 
@@ -74,15 +67,12 @@ export async function POST(request: NextRequest) {
           note: 'Video processing not available in serverless environment. Use SRT file for subtitles.'
         })
       }
-
-      // For environments with FFmpeg support (local development)
       const { processVideoWithSubtitles } = await import('@/app/lib/VideoProcessor')
       
       const { data: videoUrlData } = supabase.storage
         .from('videos')
         .getPublicUrl(transcriptionWithVideo.videos.storage_path)
-
-      // Process video with subtitles
+    
       const processedVideoBase64 = await processVideoWithSubtitles({
         videoUrl: videoUrlData.publicUrl,
         srtContent: transcriptionWithVideo.srt_content,
@@ -90,7 +80,6 @@ export async function POST(request: NextRequest) {
         subtitleStyle
       })
 
-      // Upload processed video using ADMIN CLIENT
       const processedVideoBuffer = Buffer.from(processedVideoBase64, 'base64')
       const processedFilename = `processed_${transcriptionWithVideo.videos.filename}`
       const processedPath = `processed-videos/${processedFilename}`
@@ -105,14 +94,12 @@ export async function POST(request: NextRequest) {
       if (uploadError) {
         throw new Error(`Failed to upload processed video: ${uploadError.message}`)
       }
-
-      // Update video record with processed path
       await supabase
         .from('videos')
         .update({ processed_video_path: processedPath })
         .eq('id', transcriptionWithVideo.video_id ?? '')
 
-      // Update transcription status
+  
       await supabase
         .from('transcriptions')
         .update({ 
@@ -121,7 +108,7 @@ export async function POST(request: NextRequest) {
         })
         .eq('id', transcriptionId)
 
-      // Get public URL for processed video
+
       const { data: processedUrlData } = supabaseAdmin.storage
         .from('processed-videos')
         .getPublicUrl(processedPath)
@@ -134,7 +121,7 @@ export async function POST(request: NextRequest) {
     } catch (processingError) {
       console.error('Video processing failed:', processingError)
       
-      // Fallback: mark as completed but use original video
+
       const originalVideoUrl = supabase.storage
         .from('videos')
         .getPublicUrl(transcriptionWithVideo.videos.storage_path).data.publicUrl
@@ -164,7 +151,6 @@ export async function POST(request: NextRequest) {
   } catch (error) {
     console.error('Video processing error:', error)
     
-    // Error handling - always try to parse transcriptionId
     let transcriptionId: string | null = null
     try {
       const body = await request.clone().json()
@@ -215,21 +201,17 @@ export async function GET(request: NextRequest) {
       console.error('Transcription status fetch error:', error)
       return NextResponse.json({ error: 'Transcription not found' }, { status: 404 })
     }
-
-    // Get processing status and video data
     const processingStatus = transcription.processing_status
     const videoData = Array.isArray(transcription.videos) ? transcription.videos[0] : transcription.videos
     
     let processedVideoUrl = null
     if (videoData?.processed_video_path) {
-      // Try to get URL from processed-videos bucket first, then fallback to videos bucket
       let urlData
       try {
         urlData = supabaseAdmin.storage
           .from('processed-videos')
           .getPublicUrl(videoData.processed_video_path).data
       } catch (e) {
-        // Fallback to videos bucket if processed-videos fails
         urlData = supabaseAdmin.storage
           .from('videos')
           .getPublicUrl(videoData.processed_video_path).data
