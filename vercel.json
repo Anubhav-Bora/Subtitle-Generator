@@ -1,17 +1,4 @@
 {
   "version": 2,
-  "regions": ["iad1"],
-  "functions": {
-    "app/api/transcribe/route.ts": {
-      "maxDuration": 300
-    },
-    "app/api/process-video/route.ts": {
-      "maxDuration": 300
-    }
-  },
-  "build": {
-    "env": {
-      "NEXT_BUILD_SKIP_STATIC_ANALYSIS": "true"
-    }
-  }
+  "regions": ["iad1"]
 }
